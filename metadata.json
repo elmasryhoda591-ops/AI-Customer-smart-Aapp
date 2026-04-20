@@ -1,5 +1,8 @@
 {
-  "name": "AI Customer Smart App",
+  "name": "AI Customer Smart App ",
   "description": "An intelligent customer support application that analyzes customer messages, references an uploaded knowledge base (PDF, Excel, Word, Text, Audio), and generates tailored, multi-lingual responses.",
-  "requestFramePermissions": ["microphone"]
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": []
 }

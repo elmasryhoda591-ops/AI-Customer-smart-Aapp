@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   PackagePlus, 
@@ -10,12 +10,15 @@ import {
   Lock,
   Send,
   CheckCircle2,
-  Loader2
+  Loader2,
+  Paperclip,
+  X
 } from 'lucide-react';
 import { KnowledgeBase } from './components/KnowledgeBase';
 import { CustomerInteraction } from './components/CustomerInteraction';
 import { UploadedFile } from './types';
 import { GoogleGenAI } from '@google/genai';
+import { processFile } from './utils/fileUtils';
 
 const TABS = [
   { id: 'order', label: 'طلب جديد', icon: PackagePlus },
@@ -144,16 +147,41 @@ function TabContent({ id, files }: { id: string, files: UploadedFile[] }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [aiResponse, setAiResponse] = useState('');
+  const [customerFiles, setCustomerFiles] = useState<UploadedFile[]>([]);
+  const [isProcessingFiles, setIsProcessingFiles] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setMessage('');
     setIsSubmitted(false);
     setAiResponse('');
+    setCustomerFiles([]);
   }, [id]);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files?.length) return;
+    setIsProcessingFiles(true);
+    const newFiles: UploadedFile[] = [];
+    for (let i = 0; i < e.target.files.length; i++) {
+      try {
+        const processed = await processFile(e.target.files[i]);
+        if (processed) newFiles.push(processed);
+      } catch (err) {
+        console.error("Error processing customer file:", err);
+      }
+    }
+    setCustomerFiles(prev => [...prev, ...newFiles]);
+    setIsProcessingFiles(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const removeCustomerFile = (fileId: string) => {
+    setCustomerFiles(prev => prev.filter(f => f.id !== fileId));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!message.trim()) return;
+    if (!message.trim() && customerFiles.length === 0) return;
     setIsSubmitting(true);
     
     try {
@@ -172,13 +200,31 @@ ${message}
 `;
       const textFiles = files.filter((f) => f.isText);
       textFiles.forEach((f) => {
-        promptText += `\n--- ملف: ${f.name} ---\n${f.data}\n`;
+        promptText += `\n--- ملف من قاعدة المعرفة: ${f.name} ---\n${f.data}\n`;
       });
+
+      const customerTextFiles = customerFiles.filter((f) => f.isText);
+      if (customerTextFiles.length > 0) {
+        promptText += `\n\n--- المستندات المرفقة من العميل ---\n`;
+        customerTextFiles.forEach((f) => {
+          promptText += `\n--- ملف: ${f.name} ---\n${f.data}\n`;
+        });
+      }
 
       const parts: any[] = [{ text: promptText }];
 
       const base64Files = files.filter((f) => !f.isText);
       base64Files.forEach((f) => {
+        parts.push({
+          inlineData: {
+            data: f.data,
+            mimeType: f.type,
+          },
+        });
+      });
+
+      const customerBase64Files = customerFiles.filter((f) => !f.isText);
+      customerBase64Files.forEach((f) => {
         parts.push({
           inlineData: {
             data: f.data,
@@ -277,19 +323,60 @@ ${message}
               <label className="text-sm font-medium text-gray-300 ml-1">
                 تفاصيل {content.title.replace('تقديم ', '')}
               </label>
-              <textarea
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                placeholder="اكتب رسالتك هنا بوضوح..."
-                className="w-full h-32 p-4 rounded-2xl bg-black/40 border border-white/10 text-white placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-teal-500/50 resize-none transition-all"
-                dir="rtl"
-              />
+              <div className="relative">
+                <textarea
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  placeholder="اكتب رسالتك هنا بوضوح..."
+                  className="w-full h-32 p-4 pb-12 rounded-2xl bg-black/40 border border-white/10 text-white placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-teal-500/50 resize-none transition-all"
+                  dir="rtl"
+                />
+                <div className="absolute bottom-2 right-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isProcessingFiles}
+                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white transition-colors"
+                    title="إرفاق مستند (PDF, Word, Excel, إلخ)"
+                  >
+                    {isProcessingFiles ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <Paperclip className="w-5 h-5" />
+                    )}
+                  </button>
+                  <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    onChange={handleFileChange} 
+                    className="hidden" 
+                    multiple 
+                  />
+                </div>
+              </div>
+
+              {customerFiles.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {customerFiles.map((file) => (
+                    <div key={file.id} className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 text-xs font-medium border border-white/5">
+                      <span className="truncate max-w-[150px]">{file.name}</span>
+                      <button 
+                        type="button" 
+                        onClick={() => removeCustomerFile(file.id)}
+                        className="text-gray-400 hover:text-rose-400 transition-colors"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <button
               type="submit"
-              disabled={!message.trim() || isSubmitting}
+              disabled={(!message.trim() && customerFiles.length === 0) || isSubmitting || isProcessingFiles}
               className={`w-full py-4 rounded-2xl flex items-center justify-center gap-2 font-bold transition-all ${
-                !message.trim() || isSubmitting 
+                (!message.trim() && customerFiles.length === 0) || isSubmitting || isProcessingFiles
                   ? 'bg-white/5 text-gray-500 cursor-not-allowed' 
                   : `bg-gradient-to-r ${content.color} text-white shadow-lg hover:opacity-90 hover:scale-[1.02]`
               }`}
